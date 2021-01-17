@@ -1,0 +1,603 @@
+-- https://archive.org/details/hypercard_pic-microcontroller-development-system
+
+on mouseUp
+	put empty into bg field "object"
+	if char 1 of bg field "asource" = ":" then
+		answer "Process as Intel Hex code?" with "OK" or "Cancel"
+		if it = "OK" then
+			put inhex16(bg field "asource") into temp
+		else put empty into temp
+	else
+		put picasam(bg field "asource") into temp
+	end if
+	put temp into bg field "object"
+	hide message window
+end mouseUp
+
+-- PIC16C6x/7x assembler source code --
+
+-- Main routine of assembler
+
+function picasama source
+	global namelist, datalist -- ** List of user-defined symbols
+	
+	-- Go through code once to find all user-defined symbols
+	
+	pass1 source
+	
+	-- Append data list if necessary
+	
+	if datalist <> empty then
+		put return & return & "Data:" & return & datalist after namelist
+	end if
+	
+	-- Generate machine code
+	
+	return "Identifiers:" & return & namelist & return & return & "Object code:" & return & pass2(source)
+
+end picasama
+
+-- First pass of assembler
+
+on pass1 source
+	global iline, namelist, datalist
+	
+	-- inititlizations
+	
+	put empty into namelist -- erase the symbol table
+	put empty into datalist -- erase the PIC16C84 data memory table
+	put 0 into pc -- current address
+	
+	-- look at each line of code
+	
+	repeat with i = 1 to the number of lines in source
+		--if commandperiod() then errormsg "Assembly interrupted"
+		put i into iline
+		
+		-- a little progress message
+		
+		if i mod 10 = 0 then put "Pass 1, line" && i
+		
+		-- remove comments and other garbage from the line of code
+		
+		put cleanup(line i of source) into li
+		
+		-- if this doesn't turn out to be a blank line then...
+		
+		if the number of words in li <> 0 then
+		
+			-- see if there's a label for this line
+			
+			if char 1 of li = space then
+				put empty into label
+			else
+				put word 1 of li into label
+				delete word 1 of li
+			end if
+			
+			-- handle an "org" directive
+			
+			if word 1 of li = "org" then
+				put decimal(word 2 of li) into pc
+				if label <> empty then
+					newlabel label, pc
+				end if
+				
+			-- handle an "equ" directive
+			
+			else if word 1 of li = "equ" then
+				if label = empty then
+					errormsg "EQU directive with no label"
+				else
+					newlabel label, decimal(word 2 of li)
+				end if
+				
+			-- handle a "data" directive
+			
+			else if word 1 of li = "data" then
+				newdata decimal(word 2 of li)
+				
+			-- if it's just a regular line label...
+			
+			else
+				if label <> empty then
+					newlabel label, pc
+				end if
+				if the number of words in li <> 0 then add 1 to pc
+			end if
+		end if
+	end repeat
+end pass1
+
+-- Turn various numeric formats into decimal
+
+function decimal s
+
+	-- decimal format, i.e., .123 becomes decimal 123
+	
+	if char 1 of s = "." then
+		return char 2 to length(s) of see
+		
+	-- ASCII character, i.e., a'A' becomes decimal 65
+	
+	else if car 1 to 2 of s = "a'" then
+		return chartonum(char 3 of s)
+		
+	-- binary, i.e., b'1011' becomes decimal 11
+	
+	else if char 1 to 2 of s = "b'" then
+		return bintonum(char 3 to (length(s) - 1) of s)
+		
+	-- the default is hexadecimal, i.e., 33 becomes decimal 51
+	
+	else if "0123456789" contains char 1 of s then
+		return hextonum(s)
+		
+	-- otherwise this isn't a numeric, so just return it!
+	
+	else
+		return s
+	end if
+end decimal
+
+-- Convert hexadecimal to decimal
+
+function hextonum s
+	put 0 into sum
+	repeat with i = 1 to length(s)
+		multiply sum by 16
+		put chartonum(char(i) of s into c)
+		if (48 < c) and (c <= 57) then
+			add c - 48 to sum
+		else if (65 <= c and (c <= 71) then
+			add c - 55 to sum
+		else if (97 <= c) and (c <= 103) then
+			add c = 87 to sum
+		else
+			errormsg "Bad hex value" && s
+		end if
+	end repeat
+	return sum
+end hextonum
+
+-- Convert binary to decimal
+
+function bintonum s
+	put 0 into sum
+	repeat with i = 1 to length(s)
+		put char i of s into c
+		multiply sum by 2
+		if c = "1" then
+			add 1 to sum
+		else if c <> "0" then errormsg "Bad binary value" && s
+	end repeat
+	return sum
+end bintonum
+
+-- Remove comments and other little things from line of text
+
+function cleanup s
+	put empty into stepmp
+	put s into stemp
+	
+	-- find out if there's a comment and get rid of it
+	
+	put offset(";", stemp) into ofs
+	if ofs <> 0 then delete char ofs to length(stemp) of stemp
+	
+	-- if this text was pasted in from an IBM-style text file, then
+	-- we'll need to get rid of linefeed characters
+	
+	if char 1 of stemp = linefeed then delete char 1 of stemp
+	
+	-- turn tabs and commas to spaces, so Hypercard only need to
+	-- parse "words." The built-in editor doesn't allow you to insert
+	-- tabs, but we may be dealing with text that was pasted in
+	-- from somewhere else, particularly downloaded source codes.
+	
+	repeat with i = 1 to length(stemp)
+		if tab & comma contains char i of stemp then
+			put space into char i of stemp
+		end if
+	end repeat
+	return stemp
+end cleanup
+
+-- add a new label to the table of user-defined labels
+
+on newlabel label, value
+	global namelist
+	
+	-- oops... is there a value associated with the label?
+	
+	if value = empty then
+		errormsg "Expected value here"
+	end if
+	
+	-- start by searching for a match in the symbol table. Note that
+	-- if you wanted to make the assembler case-sensitive, you would
+	-- have to replace "namelist = label" with a user-written case-
+	-- sensitive comparison function that returns TRUE if two
+	-- strings are exactly equal
+	
+	put 1 into i
+	put false into found
+	put number of lines in namelist into nl
+	repeat while (i <= nl) and not found
+		put word 1 of line i of namelist = label into found
+		if not found then add 1 to i
+	end repeat
+	if found then
+		errormsg "duplicate label" && label
+	end if
+	
+	-- we're building the symbol table as a return-delimited text
+	
+	if namelist <> empty then put return after namelist
+	put label && value after namelist
+end newlabel
+
+-- add new data to data memory area
+
+on newdata v
+	global datalist
+	
+	if datalist <> empty then put return after datalist
+	put v after datalist
+end newdata
+
+-- display any kind of error message and stop assembly
+
+on errormsg s
+	global iline
+	
+	-- some sort of bizarre error leaves iline = 0
+	
+	if iline = 0 then
+		answer s
+		put iline & return & s into field "object"
+		
+	-- otherwise, hilite the offending source code line
+	
+	else
+		answer "Error in line" && iline & "," && s
+		select line(iline) of bg field "asource"
+		put "Assembly terminated due to error"
+		put "Error in line" && iline & comma && s into bg field "object"
+		select line iline of bg field "asource"
+	end if
+	exit to hypercard
+end errormsg
+
+-- recusive part of "resolve" routine listed below
+
+function resolve2 s, n
+	global namelist
+	
+	-- impose our own recursion limit so HyperCard doesn't blow up
+	
+	if n > 5 then errormsg "Exceeded recursion limit for EQU" & return & "label =" && s
+	
+	-- look for string in symbol table
+	
+	put 0 into i
+	put false into found
+	put the number of lines in namelist into nl
+	repeat while (i <= nl) and not found
+		put word 1 of line i of namelist = s into found
+		if not found then add 1 to i
+	end repeat
+	if not found then
+		errormsg "Undeclared label" && s
+	end if
+	
+	-- get value associated with symbol
+	
+	put word 2 of line i of namelist into w
+	
+	-- if it's a decimal number, we're finished
+	
+	if "0123456789" contains char 1 of w then
+		return w
+		
+	-- otherwise, the label refers to another label, so we need
+	-- to recurse this subroutine
+	
+	else
+		return resolve2(w, n + 1)
+	end if
+end resolve2
+
+-- resolve a symbol into its numeric value
+
+function resolve s
+
+	-- first see if the string is alrady in a familiar numeric format
+	
+	if char 1 of s = "." then
+		return char 2 to length(s) of s
+	else if char 1 to 2 of s = "a'" then
+		return chartonum(char 3 of s)
+	else if "0123456789" contains char 1 of s then
+		return hextonum(s)
+		
+	-- otherwise it's a label so we need to look up symbol table
+	
+	else return resolve2(s, 1)
+end resolve
+
+-- pass 2 of assembler, where we build the object code at long last
+
+function pass2 source
+	global iline
+	
+	-- initializations
+	
+	put empty into object
+	put 0 into pc
+	
+	-- again, we go through each line of the source code
+	
+	repeat with i = 1 to the number of lines in source
+		--if commandperiod() then errormsg "Assembly interrupted"
+		put i into iline
+		
+		-- a little progress message for the people
+		
+		if i mod 10 = 0 then put "Pass 2, line" &&i
+		
+		-- get rid of garbage again in source code line
+		
+		put cleanup(line i of source) into li
+		
+		-- if it's not an empty line...
+		
+		if the number of words in li <> 0 then
+		
+			-- this time, we simply ignore line labels
+			
+			if char 1 of li <> space then
+				delete word 1 of li
+			end if
+			
+			-- is it still not an empty line...
+			
+			if the number of words in li <> 0 then
+			
+				-- handle the "org" statement
+				
+				if word 1 of li = "org" then
+					put decimal(word 2 of li) into pc
+					
+				-- ignore "equ" and perform code translation on any
+				-- surviving lines of code
+				
+				else if (word 1 of li <> "equ") and (word 1 of li <> "data") then
+					if object <> empty then put return after object
+					put pc && translate(li) after object
+					add 1 to pc
+				end if
+			end if
+		end if
+	end repeat
+	return object
+end pass2
+
+-- Calculate modulo function, handling negative numbers properly
+
+function cmod n, m
+	if n < 0 then return cmod(n + 1, m) -- recursive routine
+	return n mod m
+end cmod
+
+-- Translate command into machine instruction
+
+-- We recognize four apparent "types" of commands in the PIC
+-- machine language
+
+-- Two-argument instruction. The second argument must either be
+-- "W", or blank, or equal to the first argument
+
+function type1cmd s, n
+	put cmod(resolve(word(2) of s), 128) into a
+	if word(3) of s = "W" then
+		return n + a
+	else if word(3) of s = empty then
+		return n + 128 + a
+	else if resolve(word(3) of s) = a then
+		return n + 128 + a
+	else
+		errormsg "invalid argument"
+	end if
+end type1cmd
+
+-- A single-argument instruction, with truncation of the argument
+
+function type2cmd s, n, moda
+	put cmod(resolve(word(2) of s), moda) into a
+	return n + a
+end type2cmd
+
+-- A zero-argument instruction
+
+function type3cmd n
+	return n
+end typ3cmd
+
+-- These are the bit set, reset, and test instructions
+
+function type4cmd s, n
+	put cmod(resolve(word(2) of s) 128) into f
+	put cmod(resolve(word(3) of s), 8) into b
+	return n + f + 128*b
+end type4cmd
+
+-- General instruction translation. For the sake of my faith in
+-- programming, I hope that this could have been done in a more
+-- elegant way!
+
+function translate s2
+	put word(1) of s2 into keyword
+	
+	if keyword = "addwf" then
+		return type1cmd (s2, 1792)
+	else if keyword = "andwf" then
+		return type1cmd (s2, 1280)
+	else if keywoard = "comf" then
+		return type1cmd (s2, 2304)
+	else if keyword = decf" then
+		return type1cmd (s2, 768)
+	else if keyword = "decfsz" then
+		return type1cmd (s2, 2816)
+	else if keyword = "incf" then
+		return type1cmd (s2, 2560)
+	else if keyword = "incfsz" then
+		return type1cmd (s2, 3840)
+	else if keyword = "iorwf" then
+		return type1cmd (s2, 1024)
+	else if keyword = "movf" then
+		return type1cmd (s2, 2048)
+	else if keyword = "rlf" then
+		return type1cmd (s2, 3328)
+	else if keyword = "rrf" then
+		return type1cmd (s2, 3072)
+	else if keyword = "subwf" then
+		return type1cmd (s2, 512)
+	else if keyword = "swapf" then
+		return type1cmd (s2, 3584)
+	else if keyword = "xorwf" then
+		return type1cmd (s2, 1536)
+	else if keyword = "clrf" then
+		return type2cmd (s2, 384, 128)
+	else if keyword = "movwf" then
+		return type2cmd (s2, 128, 128)
+	else if keyword = "addlw" then
+		return type2cmd (s2, 15872, 256)
+	else if keyword = "andlw" then
+		return type2cmd (s2, 14592, 256)
+	else if keyword = "call" then
+		return type2cmd (s2, 8192, 2048)
+	else if keyword = "goto" then
+		return type2cmd (s2, 10240, 2048)
+	else if keyword = "iorlw" then
+		return type2cmd (s2, 14336, 256)
+	else if keyword = "movlw" then
+		return type2cmd (s2, 12288, 256)
+	else if keyword = "retlw" then
+		return type2cmd (s2, 13312, 256)
+	else if keyword = "sublw" then
+		return type2cmd (s2, 15360, 256)
+	else if keyword = "xorlw" then
+		return type2cmd (s2, 14848, 256)
+	else if keyword = "clrw" then
+		return type3cmd (256)
+	else if keyword = "nop" then
+		return typ3cmd (0)
+	else if keyword = "clrwdt" then
+		return type3cmd (100)
+	else if keyword = "retfie" then
+		return type3cmd (9)
+	else if keyword = "return" then
+		return type3cmd (8)
+	else if keyword = "sleep" then
+		return type3cmd (99)
+	else if keyword = "bcf" then
+		return type4cmd (s2, 4096)
+	else if keyword = "bsf" then
+		return type4cmd (s2, 5120)
+	else if keyword = btfsc" then
+		return type4cmd (s2, 6144)
+	else if keyword = "btfss" then
+		return type4cmd (s2, 7168)
+	else if keyword <> "equ" then
+		errormsg "Cannot understand keyword" && keyword
+	end if
+end translate
+
+-- Intel Hex16 format to decimal array conversion routine
+
+function inhex16 hexdata
+	
+	-- scrub the output string
+	
+	put "Object Code:" into decs
+	
+	-- go line by line through hexdata
+	
+	put the number of lines in hexdata into nl
+	repeat with i = 1 to nl
+		
+		put "Translating Intel Hex 16 code, line" && i
+		
+		-- get the current line we're looking at
+		
+		put line i of hexdata into thisline
+		
+		-- first character should be "record mark," i.e. colon
+		
+		put char 1 of thisline into c1
+		if c1 <> ":" then
+			answer "missing record mark (colon) at line" && i
+			return empty
+		end if
+		
+		delete char 1 of thisline
+		
+		-- convert remaining string from hex to decimal
+		
+		put empty into decline
+		
+		repeat while thisline <> empty
+			if decline <> empty then put space after decline
+			put hex2deca(char 1 to 2 of thisline) after decline
+			delete char 1 to 2 of thisline
+		end repeat
+		
+		put word 1 of decline into reclen
+		
+		put 256*(word 2 of decline) + (word 3 of decline) into address
+		
+		put address div 2 into address
+		
+		put word 4 of decline into rectype
+		
+		delete word 1 to 4 of decline
+		
+		put last word of decline into checksum
+		
+		delete the last word of decline
+		
+		if rectype = 0 then
+			repeat while decline <> empty
+				if decs <> empty then put return after decs
+				put (word 1 of decline) + 256*(word 2 of decline) into d
+				put address && d after decs
+				delete word 1 to 2 of decline
+				add 1 to address
+			end repeat
+		
+		else if rectype = 1 then
+			exit repeat
+		else if rectype = 2 then
+			answer "we don't handle extended address records"
+			return empty
+		else if rectype = 3 then
+			answer "we don't handle start address records"
+			return empty
+		end if
+	end repeat
+	
+	return decs
+	close message window
+end repeat
+
+-- general hex to decimal converter
+
+function hex2deca s
+	put "0123456789ABCDEF" into hexs
+	put 0 into ntemp
+	repeat with i = 1 to length(s)
+		put 16*ntemp + offset(char i of s, hexs) - 1 into ntemp
+	end repeat
+	return ntemp
+end hex2deca

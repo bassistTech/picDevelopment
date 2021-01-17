@@ -30,9 +30,14 @@ Through a succession of products for hobbyists, I gained some experience with ru
 
 ## My programmer circuit
 
+![PIC programmer](./assets/picpgm.png)
+
 ## Additional files and links
 
-SciTech Journal article on PIC development system
-SciTech Journal article on data acquisition board
-Source code for the PIC assembler, in HyperCard scripting language
+[SciTech Journal article on PIC development system (scanned pdf)](./assets/picArticle.pdf)
+
+[SciTech Journal article on data acquisition board (scanned pdf)](./assets/daqArticle.pdf)
+
+[Source code for the PIC assembler, in HyperCard scripting language (txt)](./assets/picasm.txt)
+
 The Hypercard stack itself, running under emulation
