@@ -40,4 +40,4 @@ Through a succession of products for hobbyists, I gained some experience with ru
 
 [Source code for the PIC assembler, in HyperCard scripting language (txt)](./assets/picasm.txt)
 
-The Hypercard stack itself, running under emulation
+[The Hypercard stack itself, hosted by the Internet Archive](https://archive.org/details/hypercard_pic-microcontroller-development-system)
