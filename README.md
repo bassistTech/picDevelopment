@@ -1,7 +1,5 @@
 # picDevelopment: Microchip PIC development system for 68k Apple Mac
 
-## Under construction
-
 Francis Deck, Jan. 16, 2021
 
 I recently dug up all of this stuff, and discovered that the most important pieces were still recoverable. I don't think you'd want to build anything from it today.
